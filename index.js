@@ -30,6 +30,15 @@ async function run() {
 
     // Parcel api
     app.get('/parcels',async(req,res) =>{
+      const query ={}
+      const {email}=req.query;
+      if(email){
+        query.senderEmail=email;
+      }
+
+      const cursor= parcelsCollections.find(query)
+      const result =await cursor.toArray();
+      res.send(result)
 
     })
 
