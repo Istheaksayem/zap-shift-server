@@ -3,6 +3,9 @@ const cors = require('cors')
 const app = express()
 require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
+
 const port = process.env.PORT || 3000
 
 // middleware
@@ -25,51 +28,76 @@ async function run() {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
-    const db =client.db('zap_shift_db')
-    const parcelsCollections=db.collection('parcels')
+    const db = client.db('zap_shift_db')
+    const parcelsCollections = db.collection('parcels')
 
     // Parcel api
-    app.get('/parcels',async(req,res) =>{
-      const query ={}
-      const {email}=req.query;
-      if(email){
-        query.senderEmail=email;
+    app.get('/parcels', async (req, res) => {
+      const query = {}
+      const { email } = req.query;
+      if (email) {
+        query.senderEmail = email;
       }
 
-      const options ={sort:{createdAt:-1}}
+      const options = { sort: { createdAt: -1 } }
 
-      const cursor= parcelsCollections.find(query,options)
-      const result =await cursor.toArray();
+      const cursor = parcelsCollections.find(query, options)
+      const result = await cursor.toArray();
       res.send(result)
 
     })
 
     // payment 
-    app.get('/parcels/:id',async(req,res)=>{
-      const id =req.params.id;
-      const query ={_id:new ObjectId(id)}
-      const result =await parcelsCollections.findOne(query)
+    app.get('/parcels/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
+      const result = await parcelsCollections.findOne(query)
       res.send(result)
 
     })
 
-    app.post('/parcels',async(req,res) =>{
-      const parcel =req.body;
+    app.post('/parcels', async (req, res) => {
+      const parcel = req.body;
       // parcel created time
-      parcel.createdAt =new Date();
-      const result =await parcelsCollections.insertOne(parcel)
+      parcel.createdAt = new Date();
+      const result = await parcelsCollections.insertOne(parcel)
       res.send(result)
     })
 
     // parcel Delete
-    app.delete('/parcels/:id',async(req,res) =>{
-      const id =req.params.id;
-      const query ={_id: new ObjectId(id)}
+    app.delete('/parcels/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) }
 
-      const result =await parcelsCollections.deleteOne(query)
+      const result = await parcelsCollections.deleteOne(query)
       res.send(result)
     })
 
+    // stripe{payment related api}
+
+    app.post('/create-checkout-session', async (req, res) => {
+      const paymentInfo = req.body;
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+            price_data: {
+              currency: 'USD',
+              unit_amount:1500,
+              product_data: {
+                name: paymentInfo.parcelName
+              },
+
+            },
+            quantity: 1,
+
+          },
+        ],
+        customer_email: paymentInfo.senderEmail,
+        mode: 'payment',
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+      })
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
