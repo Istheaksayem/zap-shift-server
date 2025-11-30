@@ -74,18 +74,18 @@ async function run() {
     })
 
     // stripe{payment related api}
-
-    app.post('/create-checkout-session', async (req, res) => {
+    app.post('/payment-checkout-session', async (req, res) => {
       const paymentInfo = req.body;
+      const amount =parseInt(paymentInfo.cost)*100
       const session = await stripe.checkout.sessions.create({
         line_items: [
           {
             // Provide the exact Price ID (for example, price_1234) of the product you want to sell
             price_data: {
               currency: 'USD',
-              unit_amount:1500,
+              unit_amount: amount,
               product_data: {
-                name: paymentInfo.parcelName
+                name: `please pay for :${paymentInfo.parcelName}`
               },
 
             },
@@ -95,9 +95,66 @@ async function run() {
         ],
         customer_email: paymentInfo.senderEmail,
         mode: 'payment',
-        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+        metadata: {
+          parcelId: paymentInfo.parcelId
+        },
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
       })
+      res.send({url:session.url})
     })
+    // update parcel payment
+    app.patch('/payment-success',async(req,res) =>{
+      const sessionId =req.query.session_id;
+
+      const session =await stripe.checkout.sessions.retrieve(sessionId)
+      console.log('session retrieve',session)
+      if(session.payment_status === 'paid'){
+        const id =session.metadata.parcelId;
+        const query ={_id: new ObjectId(id)}
+        const update ={
+          $set:{
+            paymentStatus:'paid',
+
+          }
+        }
+        const result =await parcelsCollections.updateOne(query,update);
+        res.send(result)
+      }
+      res.send({success:true})
+    })
+
+    // old
+    // app.post('/create-checkout-session', async (req, res) => {
+    //   const paymentInfo = req.body;
+    //   const amount = parseInt(paymentInfo.cost) * 100
+    //   const session = await stripe.checkout.sessions.create({
+    //     line_items: [
+    //       {
+    //         // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+    //         price_data: {
+    //           currency: 'USD',
+    //           unit_amount: amount,
+    //           product_data: {
+    //             name: paymentInfo.parcelName
+    //           },
+
+    //         },
+    //         quantity: 1,
+
+    //       },
+    //     ],
+    //     customer_email: paymentInfo.senderEmail,
+    //     mode: 'payment',
+    //     metadata: {
+    //       parcelId: paymentInfo.parcelId
+    //     },
+    //     success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+    //     cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    //   })
+    //   console.log(session)
+    //   res.send({ url: session.url })
+    // })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
