@@ -1,4 +1,5 @@
 const express = require('express')
+const crypto=require('crypto')
 const cors = require('cors')
 const app = express()
 require('dotenv').config()
@@ -7,6 +8,17 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 
 const port = process.env.PORT || 3000
+
+function generateTrackingId(){
+    const prefix ="PRCL";
+    const date =new Date().toISOString().slice(0,10).replace(/-/g,"") 
+    //  YYYYMMDD
+
+    const random =crypto.randomBytes(3).toString("hex").toUpperCase();
+  // 6-char random hex
+
+    return `${prefix}-${date}-${random}`
+}
 
 // middleware
 app.use(express.json())
@@ -98,7 +110,7 @@ async function run() {
         mode: 'payment',
         metadata: {
           parcelId: paymentInfo.parcelId,
-          parcelName: paymentInfo.metadata.parcelName
+          parcelName: paymentInfo.parcelName
         },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
@@ -111,12 +123,15 @@ async function run() {
 
       const session = await stripe.checkout.sessions.retrieve(sessionId)
       console.log('session retrieve', session)
+      const trackingId =generateTrackingId()
+
       if (session.payment_status === 'paid') {
         const id = session.metadata.parcelId;
         const query = { _id: new ObjectId(id) }
         const update = {
           $set: {
             paymentStatus: 'paid',
+            trackingId:trackingId
 
           }
         }
@@ -125,17 +140,24 @@ async function run() {
         const payment = {
           amount: session.amount_total / 100,
           currency: session.currency,
-          customerEmail: customer_email,
+          customerEmail:session.customer_email,
           parcelId: session.metadata.parcelId,
           parcelName: session.metadata.parcelName,
           transactionId: session.payment_intent,
           paymentStatus: session.payment_status,
-          paidAt:new Date(),
-          trackingId:''
+          paidAt:new Date()
+        
         }
         if (session.payment_status === 'paid') {
-          const resultPayment = await parcelsCollections.insertOne(payment)
-          res.send({ success: true, modifyParcel: result, paymentInfo: resultPayment })
+          const resultPayment = await paymentCollection.insertOne(payment)
+          res.send({ 
+            
+            success: true,
+            trackingId:trackingId,
+            transactionId: session.payment_intent,
+            modifyParcel: result, 
+            paymentInfo: resultPayment 
+          })
         }
 
         res.send(result)
