@@ -30,6 +30,7 @@ async function run() {
 
     const db = client.db('zap_shift_db')
     const parcelsCollections = db.collection('parcels')
+    const paymentCollection = db.collection('payments')
 
     // Parcel api
     app.get('/parcels', async (req, res) => {
@@ -76,7 +77,7 @@ async function run() {
     // stripe{payment related api}
     app.post('/payment-checkout-session', async (req, res) => {
       const paymentInfo = req.body;
-      const amount =parseInt(paymentInfo.cost)*100
+      const amount = parseInt(paymentInfo.cost) * 100
       const session = await stripe.checkout.sessions.create({
         line_items: [
           {
@@ -96,32 +97,50 @@ async function run() {
         customer_email: paymentInfo.senderEmail,
         mode: 'payment',
         metadata: {
-          parcelId: paymentInfo.parcelId
+          parcelId: paymentInfo.parcelId,
+          parcelName: paymentInfo.metadata.parcelName
         },
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
       })
-      res.send({url:session.url})
+      res.send({ url: session.url })
     })
     // update parcel payment
-    app.patch('/payment-success',async(req,res) =>{
-      const sessionId =req.query.session_id;
+    app.patch('/payment-success', async (req, res) => {
+      const sessionId = req.query.session_id;
 
-      const session =await stripe.checkout.sessions.retrieve(sessionId)
-      console.log('session retrieve',session)
-      if(session.payment_status === 'paid'){
-        const id =session.metadata.parcelId;
-        const query ={_id: new ObjectId(id)}
-        const update ={
-          $set:{
-            paymentStatus:'paid',
+      const session = await stripe.checkout.sessions.retrieve(sessionId)
+      console.log('session retrieve', session)
+      if (session.payment_status === 'paid') {
+        const id = session.metadata.parcelId;
+        const query = { _id: new ObjectId(id) }
+        const update = {
+          $set: {
+            paymentStatus: 'paid',
 
           }
         }
-        const result =await parcelsCollections.updateOne(query,update);
+        const result = await parcelsCollections.updateOne(query, update);
+
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: customer_email,
+          parcelId: session.metadata.parcelId,
+          parcelName: session.metadata.parcelName,
+          transactionId: session.payment_intent,
+          paymentStatus: session.payment_status,
+          paidAt:new Date(),
+          trackingId:''
+        }
+        if (session.payment_status === 'paid') {
+          const resultPayment = await parcelsCollections.insertOne(payment)
+          res.send({ success: true, modifyParcel: result, paymentInfo: resultPayment })
+        }
+
         res.send(result)
       }
-      res.send({success:true})
+      res.send({ success: false })
     })
 
     // old
