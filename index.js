@@ -1,5 +1,5 @@
 const express = require('express')
-const crypto=require('crypto')
+const crypto = require('crypto')
 const cors = require('cors')
 const app = express()
 require('dotenv').config()
@@ -9,15 +9,15 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET);
 
 const port = process.env.PORT || 3000
 
-function generateTrackingId(){
-    const prefix ="PRCL";
-    const date =new Date().toISOString().slice(0,10).replace(/-/g,"") 
-    //  YYYYMMDD
+function generateTrackingId() {
+  const prefix = "PRCL";
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+  //  YYYYMMDD
 
-    const random =crypto.randomBytes(3).toString("hex").toUpperCase();
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase();
   // 6-char random hex
 
-    return `${prefix}-${date}-${random}`
+  return `${prefix}-${date}-${random}`
 }
 
 // middleware
@@ -122,8 +122,29 @@ async function run() {
       const sessionId = req.query.session_id;
 
       const session = await stripe.checkout.sessions.retrieve(sessionId)
-      console.log('session retrieve', session)
-      const trackingId =generateTrackingId()
+
+
+      // console.log('session retrieve', session)
+
+
+      // api 2 bar hit na korar jorno
+      const transactionId = session.payment_intent;
+      const query = { transactionId: transactionId }
+
+      const paymentExist = await paymentCollection.findOne(query)
+      console.log(paymentExist)
+      if (paymentExist) {
+
+        return res.send
+          ({
+            message: 'already Exist',
+            transactionId,
+            trackingId: paymentExist.trackingId
+          })
+      }
+
+
+      const trackingId = generateTrackingId()
 
       if (session.payment_status === 'paid') {
         const id = session.metadata.parcelId;
@@ -131,7 +152,7 @@ async function run() {
         const update = {
           $set: {
             paymentStatus: 'paid',
-            trackingId:trackingId
+            trackingId: trackingId
 
           }
         }
@@ -140,23 +161,24 @@ async function run() {
         const payment = {
           amount: session.amount_total / 100,
           currency: session.currency,
-          customerEmail:session.customer_email,
+          customerEmail: session.customer_email,
           parcelId: session.metadata.parcelId,
           parcelName: session.metadata.parcelName,
           transactionId: session.payment_intent,
           paymentStatus: session.payment_status,
-          paidAt:new Date()
-        
+          paidAt: new Date(),
+          trackingId: trackingId
+
         }
         if (session.payment_status === 'paid') {
           const resultPayment = await paymentCollection.insertOne(payment)
-          res.send({ 
-            
+          res.send({
+
             success: true,
-            trackingId:trackingId,
+            trackingId: trackingId,
             transactionId: session.payment_intent,
-            modifyParcel: result, 
-            paymentInfo: resultPayment 
+            modifyParcel: result,
+            paymentInfo: resultPayment
           })
         }
 
@@ -165,6 +187,18 @@ async function run() {
       res.send({ success: false })
     })
 
+      // payment related apis(history)
+      app.get('/payments',async(req,res) =>{
+        const email=req.query.email;
+        const query ={}
+        if(email){
+          query.customerEmail=email;
+
+        }
+        const cursor = paymentCollection.find(query)
+        const result =await cursor.toArray()
+        res.send(result)
+      })
     // old
     // app.post('/create-checkout-session', async (req, res) => {
     //   const paymentInfo = req.body;
